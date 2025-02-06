@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 from frame_sdk import Frame
 from TxSprite import TxSprite
-from PIL import Image
+from PIL import Image, ImageOps
 
 async def send_in_chunks(f, msg_code, payload):
     """Send a large payload in BLE-compatible chunks."""
@@ -38,35 +38,47 @@ async def send_in_chunks(f, msg_code, payload):
     print("All chunks sent successfully!")
 
 async def process_and_send_image(f: Frame, image_path: str):
-    """Load a pre-existing image, process it to black & white, and send it to Frame in chunks."""
+    """Load a pre-existing image, process it, and send it to Frame in chunks."""
 
-    print(f"Loading image: {image_path}")
+    print(f"Loading preloaded image: {image_path}")
 
-    # Load image and convert to black & white (1-bit mode: only black and white pixels)
-    img = Image.open(image_path).convert("L")  # Convert to grayscale
-    img = img.point(lambda x: 0 if x < 128 else 255, "1")  # Convert to pure black & white
-    img = img.resize((200, 200))  # Resize for Frame compatibility
+    #  Load image and convert to indexed color mode (Palette Mode)
+    img = Image.open(image_path)
+    img = ImageOps.exif_transpose(img)  # Automatically correct rotation based on EXIF metadata
+    img = img.convert("RGB")  # Convert to RGB Mode
 
-    # Save the processed image as PNG (for debugging)
-    processed_image_path = "processed_sprite_bw.png"
-    img.save(processed_image_path)
-    print(f"Black & white image saved as: {processed_image_path}")
+    # Resize the image to fit the Frame's display
+    target_size = (320, 200)
+    img.thumbnail(target_size, Image.LANCZOS)  # Resize while keeping aspect ratio
+
+    # Create a blank image (padded background) in the target size
+    padded_img = Image.new("RGB", target_size, (0, 0, 0))  # Black background
+    x_offset = (target_size[0] - img.width) // 2  # Center horizontally
+    y_offset = (target_size[1] - img.height) // 2  # Center vertically
+    padded_img.paste(img, (x_offset, y_offset))  # Paste resized img onto background
+
+    # Convert to indexed color (16-color palette mode)
+    padded_img = padded_img.convert("P", palette=Image.ADAPTIVE, colors=16)
+
+    # Save processed image for debugging/testing
+    processed_image_path = "processed_sprite.png"
+    padded_img.save(processed_image_path)
+    print(f"Image processed and saved as: {processed_image_path}")
 
     # Pack the image into a TxSprite object
-    sprite = TxSprite(msg_code=0x20, image_path=processed_image_path, num_colors=2)  # Only 2 colors (B/W)
+    sprite = TxSprite(msg_code=0x20, image_path=processed_image_path)
     packed_data = sprite.pack()
 
     # Check the size of the packed payload
     print(f"Packed sprite payload size: {len(packed_data)} bytes")
 
-    # Send the packed data to Frame in BLE-compatible chunks
+    # Send the packed data to Frame in chunks
     try:
-        print("Sending black & white image data in BLE-compatible chunks...")
+        print("Sending image data in BLE-compatible chunks...")
         await send_in_chunks(f, sprite.msg_code, packed_data)
-        print("Black & white image successfully sent!")
+        print("Image successfully sent!")
     except Exception as e:
         print(f"Failed to send image: {e}")
-
 
 async def main():
     #await check_camera_feed()

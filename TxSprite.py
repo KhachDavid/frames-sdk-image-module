@@ -1,91 +1,52 @@
 from PIL import Image
-import numpy as np
-import struct
 
 class TxSprite:
-    def __init__(self, msg_code, image_path, num_colors=16):
+    def __init__(self, msg_code, image_path):
         self.msg_code = msg_code
-        self.num_colors = num_colors  # Number of palette colors
+        self.num_colors = 2  # 1-bit means 2 colors (black & white)
 
-        self.image = Image.open(image_path).convert("RGB")
-        # Convert to indexed image with the specified number of colors
-        self.image = self.image.convert("P", palette=Image.ADAPTIVE, colors=num_colors)
-
-        # Extract palette and image details
-        self.palette = self.image.getpalette()[: self.num_colors * 3]  # RGB Palette
-        self.pixel_data = list(self.image.getdata())
+        # Convert to 1-bit monochrome with dithering
+        self.image = Image.open(image_path).convert("1")  # Monochrome + Dithering
         self.width, self.height = self.image.size
-        self.bpp = self.calculate_bpp()  # Bits per pixel based on num_colors
-
-    def calculate_bpp(self):
-        """Determine bits per pixel based on the number of colors."""
-        if self.num_colors <= 16:  # 16 colors max -> 4 bits
-            return 4
-        elif self.num_colors <= 64:  # 64 colors max -> 6 bits
-            return 6
-        elif self.num_colors <= 256:  # 256 colors max -> 8 bits
-            return 8
-        raise ValueError("Frame supports a maximum of 256 colors.")
+        self.bpp = 1  # 1-bit per pixel
+        self.pixel_data = list(self.image.getdata())
 
     def pack(self):
-        """Pack the sprite into a binary format for Frame."""
+        """Pack the sprite efficiently for 1-bit storage (row-major order)."""
         width_msb = self.width >> 8
         width_lsb = self.width & 0xFF
         height_msb = self.height >> 8
         height_lsb = self.height & 0xFF
 
-        packed_pixels = self.pack_pixels_by_bpp(self.pixel_data, self.bpp)
-
-        # Format: Width, Height, BPP, #Colors, Palette, Pixels
         payload = bytearray([width_msb, width_lsb, height_msb, height_lsb, self.bpp, self.num_colors])
-        payload.extend(self.palette)  # Palette is RGB triplets
-        payload.extend(packed_pixels)  # Add packed pixel data
+
+        ## Convert pixel data to 1-bit packed format (fix row alignment issue) ##
+        packed_pixels = self.pack_1bit_row_major(self.pixel_data, self.width, self.height)
+        payload.extend(packed_pixels)
 
         return payload
 
-    def pack_pixels_by_bpp(self, pixel_data, bpp):
-        """Pack pixel data based on bit depth."""
-        if bpp == 4:  # 4 bits per pixel (16 colors)
-            return self.pack_4bit(pixel_data)
-        elif bpp == 6:  # 6 bits per pixel (64 colors)
-            return self.pack_6bit(pixel_data)
-        elif bpp == 8:  # 8 bits per pixel (256 colors)
-            return bytearray(pixel_data)  # No packing needed
-        else:
-            raise ValueError("Unsupported bits per pixel.")
-
     @staticmethod
-    def pack_4bit(pixel_data):
-        """Pack 4-bit pixel data into bytes."""
-        packed = bytearray()
-        for i in range(0, len(pixel_data), 2):
-            if i + 1 < len(pixel_data):
-                packed.append((pixel_data[i] << 4) | (pixel_data[i + 1] & 0x0F))
-            else:
-                packed.append(pixel_data[i] << 4)
-        return packed
+    def pack_1bit_row_major(pixel_data, width, height):
+        """Packs a 1-bit monochrome image ensuring correct row order (left-to-right, top-to-bottom)."""
+        packed_data = bytearray()
 
-    @staticmethod
-    def pack_6bit(pixel_data):
-        """Pack 6-bit pixel data into bytes."""
-        packed = bytearray()
+        for y in range(height):  # Iterate over rows
+            byte = 0
+            bit_position = 7  # Start with leftmost bit
 
-        for i in range(0, len(pixel_data), 4):
-            # Ensure all pixel values are within 6 bits (0-63)
-            p0 = pixel_data[i] & 0x3F
-            p1 = pixel_data[i + 1] & 0x3F if i + 1 < len(pixel_data) else 0
-            p2 = pixel_data[i + 2] & 0x3F if i + 2 < len(pixel_data) else 0
-            p3 = pixel_data[i + 3] & 0x3F if i + 3 < len(pixel_data) else 0
+            for x in range(width):  # Iterate over pixels in a row
+                idx = y * width + x  # Correct indexing per row
+                pixel = pixel_data[idx]
 
-            # First and second pixels (6 bits each -> 12 bits, split across 2 bytes)
-            packed.append((p0 << 2) | (p1 >> 4))
+                if pixel > 127:  # White (1)
+                    byte |= (1 << bit_position)
 
-            # Second and third pixels (remaining bits of p1 + 6 bits of p2, max 255)
-            packed.append(((p1 & 0x0F) << 4) | (p2 >> 2))
+                bit_position -= 1  # Move to next bit
 
-            # Third and fourth pixels (remaining bits of p2 + 6 bits of p3, max 255)
-            packed.append(((p2 & 0x03) << 6) | p3)
+                if bit_position < 0 or x == width - 1:  # Store byte when full or end of row
+                    packed_data.append(byte)
+                    byte = 0
+                    bit_position = 7  # Reset bit position for the next byte
 
-        return packed
-
-
+        return packed_data
