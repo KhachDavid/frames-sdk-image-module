@@ -73,12 +73,12 @@ end
 
 -- Main app loop
 function app_loop()
-	print("Main App Running")
 	frame.display.text("Main App Running", 1, 1)
 	frame.display.show()
 
 	while true do
         rc, err = pcall(
+
             function()
 				-- process any raw data items, if ready
 				local items_ready = data.process_raw_items()

@@ -1,10 +1,12 @@
+import time
 import asyncio
 from pathlib import Path
 from frame_sdk import Frame
 from TxSprite import TxSprite
 from PIL import Image, ImageOps
+from frame_sdk.camera import AutofocusType, Quality
 
-async def send_in_chunks(f, msg_code, payload):
+async def send_in_chunks(f: Frame, msg_code, payload):
     """Send a large payload in BLE-compatible chunks."""
     max_chunk_size = f.bluetooth.max_data_payload() - 5  # Maximum BLE payload size is 240
     print(f"Max BLE payload size: {max_chunk_size}")
@@ -18,8 +20,6 @@ async def send_in_chunks(f, msg_code, payload):
 
         # Extract the next chunk
         chunk = payload[sent_bytes : sent_bytes + chunk_size]
-
-        print(f"Sending chunk: {len(chunk)} bytes (offset: {sent_bytes}/{total_size})")
 
         # Add the msg_code (as the first byte of the packet) to the chunk
         if sent_bytes == 0:
@@ -110,12 +110,37 @@ async def main():
     await f.files.write_file("frame_app.lua", Path("lua/frame_app.lua").read_bytes())
 
     # "require" the main lua file to run it
-    await f.run_lua("require('frame_app')print('done')", await_print=True)
-
+    await f.run_lua("require('frame_app')", await_print=False)
+    time.sleep(10)
     temp_file = "test_photo_0.jpg"
+    print("Sending image to Frame...")
     await process_and_send_image(f, temp_file)
 
-    await asyncio.sleep(1.0)
+    time.sleep(5)
+
+    resolution = 320
+    pan = 0
+    resolution_half = resolution // 2   # Lua expects half-resolution
+    pan_shifted = pan + 140             # Reverse shift calculation
+    raw = 0                             # Do not send raw image data
+
+    # Save the photo to a file
+    # await f.camera.save_photo("test_photo_1.jpg", autofocus_seconds=3, quality=Quality.MEDIUM, autofocus_type=AutofocusType.CENTER_WEIGHTED)
+    lua_command = f"camera.capture_and_send({Quality.MEDIUM}, {resolution_half}, {pan_shifted}, {int(raw)})"
+
+    await f.bluetooth.send_lua(lua_command)
+    image_buffer = await f.bluetooth.wait_for_data()
+
+    if image_buffer is None or len(image_buffer) == 0:
+        raise Exception("Failed to get photo")
+
+    # Handle possible unwanted tap data
+    while image_buffer[0] == 0x04 and len(image_buffer) < 5:
+        print("Ignoring tap data while waiting for photo")
+        image_buffer = await f.bluetooth.wait_for_data()
+
+        if image_buffer is None or len(image_buffer) == 0:
+            raise Exception("Failed to get photo")
 
     # clean disconnection
     await f.bluetooth.disconnect()

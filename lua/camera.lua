@@ -161,6 +161,64 @@ function _M.capture_and_send(args)
 	end
 end
 
+function cameraCaptureAndSend(quality, autoExpTimeDelay, autofocusType)
+    local last_autoexp_time = 0
+    local state = 'EXPOSING'
+    local state_time = frame.time.utc()
+    local chunkIndex = 0
+    if autoExpTimeDelay == nil then
+        state = 'CAPTURE'
+    end
+
+    while true do
+        if state == 'EXPOSING' then
+            if frame.time.utc() - last_autoexp_time > 0.1 then
+                frame.camera.auto { metering = autofocusType }
+                last_autoexp_time = frame.time.utc()
+            end
+            if frame.time.utc() > state_time + autoExpTimeDelay then
+                state = 'CAPTURE'
+            end
+        elseif state == 'CAPTURE' then
+            frame.camera.capture { quality_factor = quality }
+            state_time = frame.time.utc()
+            state = 'WAIT'
+        elseif state == 'WAIT' then
+            if frame.time.utc() > state_time + 0.4 then
+                state = 'SEND'
+            end
+        elseif state == 'SEND' then
+            local i = frame.camera.read(frame.bluetooth.max_length() - 3)
+
+            if i == nil then
+                state = 'DONE'
+            else
+                local prefix = string.char(FrameDataTypePrefixes.photoData.valueAsHex)  -- Convert prefix to byte
+
+                while true do
+                    if pcall(frame.bluetooth.send, prefix .. i) then
+                        break  -- Successfully sent, move to next chunk
+                    end
+                    frame.sleep(0.01)
+                end 
+                
+                chunkIndex = chunkIndex + 1
+            end
+        elseif state == 'DONE' then
+            local endPrefix = string.char(FrameDataTypePrefixes.photoDataEnd.valueAsHex)  -- End transmission prefix
+
+            while true do
+                if pcall(frame.bluetooth.send, endPrefix .. tostring(chunkIndex)) then
+                    break
+                end
+            end 
+
+            break  -- End function
+        end
+    end
+end
+
+
 print("Loaded camera.lua")  -- Debugging message
 
 return _M
