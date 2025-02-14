@@ -100,9 +100,13 @@ async def main():
 
     # send the std lua files to Frame that handle data accumulation and sprite parsing
     await f.display.show_text("Loading...")
-    await f.files.write_file("data.lua", Path("lua/data.lua").read_bytes())
-    await f.files.write_file("sprite.lua", Path("lua/sprite.lua").read_bytes())
     # send the main lua file to Frame that will run the app to display the sprite when the message arrives
+    await f.files.write_file("data.lua", Path("lua/data.lua").read_bytes())
+    await f.files.write_file("battery.lua", Path("lua/battery.lua").read_bytes())
+    await f.files.write_file("camera.lua", Path("lua/camera.lua").read_bytes())
+    await f.files.write_file("code.lua", Path("lua/code.lua").read_bytes())
+    await f.files.write_file("plain_text.lua", Path("lua/plain_text.lua").read_bytes())
+    await f.files.write_file("sprite.lua", Path("lua/sprite.lua").read_bytes())
     await f.files.write_file("frame_app.lua", Path("lua/frame_app.lua").read_bytes())
 
     # "require" the main lua file to run it
